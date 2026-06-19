@@ -1,0 +1,311 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import csv
+import sys
+from pathlib import Path
+
+# Stored menu items
+BREAD_MENU = {
+    "Toast": 2.00,
+    "English Muffin": 2.50,
+    "Bagel": 3.00,
+}
+
+SPREAD_MENU = {
+    "Plain": 0.00,
+    "Honey": 0.50,
+    "Strawberry Jam": 1.00,
+    "Grape Jam": 1.00,
+    "Rhubarb Jam": 1.50,
+}
+
+SALES_TAX_RATE = 0.06
+
+if getattr(sys, "frozen", False):
+    APP_FOLDER = Path(sys.executable).parent
+else:
+    APP_FOLDER = Path(__file__).parent
+
+CSV_FILE = APP_FOLDER / "orders.csv"
+
+class JamsJamsApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Jams' Jams Order") # title of application window
+        self.root.configure(bg="#fdf6e3") # changes background color of app
+
+        # Current selection
+        self.bread_var = tk.StringVar(value="")
+        self.spread_var = tk.StringVar(value="Plain")
+
+        # Cart: list of dicts: {"bread": ..., "spread": ..., "line_total": ...}
+        self.cart = []
+
+        main_frame = ttk.Frame(root, padding=15)
+        main_frame.pack(fill="both", expand=True)
+
+        title_label = ttk.Label(
+            main_frame,
+            text="Welcome to Jams' Jams",
+            font=("Helvetica", 18, "bold")
+        )
+        # Formats layout for GUI app using Tkinter
+        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 10)) # title at top
+        
+        # creates separate frames for bread, spreads, and order
+        breads_frame = ttk.LabelFrame(main_frame, text="Choose Your Bread *required")
+        breads_frame.grid(row=1, column=0, padx=(0, 10), pady=5, sticky="nsew")
+
+        spreads_frame = ttk.LabelFrame(main_frame, text="Choose Your Spread")
+        spreads_frame.grid(row=1, column=1, padx=(10, 0), pady=5, sticky="nsew")
+
+        order_frame = ttk.LabelFrame(main_frame, text="Current Order (Cart)")
+        order_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0), sticky="nsew")
+
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+
+        # Bread options
+        for i, (name, price) in enumerate(BREAD_MENU.items()):
+            text = f"{name} - ${price:.2f}"
+            rb = ttk.Radiobutton(
+                breads_frame,
+                text=text,
+                value=name,
+                variable=self.bread_var
+            )
+            rb.grid(row=i, column=0, sticky="w", padx=5, pady=2)
+
+        # Spread options
+        for i, (name, price) in enumerate(SPREAD_MENU.items()):
+            text = f"{name} - ${price:.2f}"
+            rb = ttk.Radiobutton(
+                spreads_frame,
+                text=text,
+                value=name,
+                variable=self.spread_var
+            )
+            rb.grid(row=i, column=0, sticky="w", padx=5, pady=2)
+
+        # Cart display
+        self.cart_text = tk.Text(order_frame, width=60, height=10,
+                                 state="disabled", bg="#fefcf5")
+        self.cart_text.grid(row=0, column=0, columnspan=3,
+                            padx=5, pady=5, sticky="nsew")
+        order_frame.rowconfigure(0, weight=1)
+        order_frame.columnconfigure(0, weight=1)
+
+        # Running totals
+        self.subtotal_var = tk.StringVar(value="$0.00")
+        self.tax_var = tk.StringVar(value="$0.00")
+        self.total_var = tk.StringVar(value="$0.00")
+
+        ttk.Label(order_frame, text="Subtotal:").grid(row=1, column=0,
+            sticky="e", padx=5, pady=(2, 0))
+        ttk.Label(order_frame, textvariable=self.subtotal_var).grid(row=1, column=1,
+            sticky="w", padx=5, pady=(2, 0))
+
+        ttk.Label(order_frame, text="Tax (6%):").grid(row=2, column=0,
+            sticky="e", padx=5, pady=(2, 0))
+        ttk.Label(order_frame, textvariable=self.tax_var).grid(row=2, column=1,
+            sticky="w", padx=5, pady=(2, 0))
+
+        ttk.Label(order_frame, text="Total:").grid(row=3, column=0,
+            sticky="e", padx=5, pady=(2, 5))
+        ttk.Label(order_frame, textvariable=self.total_var,
+                  font=("Helvetica", 11, "bold")).grid(
+            row=3, column=1, sticky="w", padx=5, pady=(2, 5)
+        )
+
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+
+        add_btn = ttk.Button(button_frame, text="Add Item to Order",
+                             command=self.add_item_to_cart)
+        add_btn.grid(row=0, column=0, padx=5)
+
+        place_btn = ttk.Button(button_frame, text="Place & Save Order",
+                               command=self.place_and_save_order)
+        place_btn.grid(row=0, column=1, padx=5)
+
+        clear_btn = ttk.Button(button_frame, text="Clear Order",
+                               command=self.clear_order)
+        clear_btn.grid(row=0, column=2, padx=5)
+
+        self.update_cart_display()
+
+    def add_item_to_cart(self):
+        """Add current selection as a line item and update running totals."""
+        bread = self.bread_var.get()
+        spread = self.spread_var.get()
+
+        # error checks
+        if not bread:
+            messagebox.showerror(
+                "Choose a bread",
+                "To add an item, please pick one bread (Toast, English Muffin, or Bagel)."
+            )
+            return
+        if bread not in BREAD_MENU or spread not in SPREAD_MENU:
+            messagebox.showerror(
+                "Invalid choice",
+                "The selected bread or spread is not on the menu. Please choose from the lists provided."
+            )
+            return
+
+        bread_price = BREAD_MENU[bread]
+        spread_price = SPREAD_MENU[spread]
+        line_total = bread_price + spread_price
+
+        # adds each item to cart and keeps running total of price
+        self.cart.append({
+            "bread": bread,
+            "spread": spread,
+            "bread_price": bread_price,
+            "spread_price": spread_price,
+            "line_total": line_total,
+        })
+
+        self.update_cart_display() # updates visual display of order in cart
+
+    def update_cart_display(self):
+        """Refresh the cart text and running totals after any change."""
+        self.cart_text.config(state="normal")
+        self.cart_text.delete("1.0", tk.END)
+
+        # error check to make sure something was ordered
+        if not self.cart:
+            self.cart_text.insert(
+                tk.END,
+                "Your order is empty. Choose a bread and spread, then click 'Add Item to Order'."
+            )
+        else:
+            self.cart_text.insert(tk.END, "Current Order:\n")
+            self.cart_text.insert(tk.END, "------------------------------\n")
+            for idx, item in enumerate(self.cart, start=1):
+                line = (
+                    f"{idx}. {item['bread']} + {item['spread']} "
+                    f"= ${item['line_total']:.2f}\n"
+                )
+                self.cart_text.insert(tk.END, line)
+
+        self.cart_text.config(state="disabled")
+
+        # Recalc running totals (shopping-cart style)
+        subtotal = sum(it["line_total"] for it in self.cart)
+        tax = round(subtotal * SALES_TAX_RATE, 2)
+        total = round(subtotal + tax, 2)
+
+        self.subtotal_var.set(f"${subtotal:.2f}")
+        self.tax_var.set(f"${tax:.2f}")
+        self.total_var.set(f"${total:.2f}")
+
+    def place_and_save_order(self):
+        """Confirm entire cart, then save to CSV as one order with multiple lines."""
+        # check cart for items
+        if not self.cart:
+            messagebox.showerror(
+                "No items",
+                "Your order is empty. Add at least one item before placing the order."
+            )
+            return
+
+        subtotal = sum(it["line_total"] for it in self.cart)
+        tax = round(subtotal * SALES_TAX_RATE, 2)
+        total = round(subtotal + tax, 2)
+
+        # Build confirmation message showing all items.
+        lines = ["You are about to place this order:\n"]
+        for idx, item in enumerate(self.cart, start=1):
+            lines.append(
+                f"{idx}. {item['bread']} + {item['spread']} "
+                f"= ${item['line_total']:.2f}"
+            )
+        lines.append("")
+        lines.append(f"Subtotal: ${subtotal:.2f}")
+        lines.append(f"Tax (6%): ${tax:.2f}")
+        lines.append(f"Total:    ${total:.2f}")
+        confirm_msg = "\n".join(lines)
+
+        from tkinter.messagebox import askyesno
+        answer = askyesno(
+            title="Confirm Entire Order",
+            message=confirm_msg
+        )
+        if not answer:
+            messagebox.showinfo(
+                "Order not saved",
+                "Your order was not saved. You can keep editing your cart."
+            )
+            return
+
+        try:
+            self.save_cart_to_csv(subtotal, tax, total)
+            messagebox.showinfo(
+                "Order saved",
+                "Your full order was saved successfully to orders.csv."
+            )
+            # Optional: clear after successful save
+            self.clear_order(no_message=True)
+        except Exception as e:
+            messagebox.showerror(
+                "Save error",
+                f"Could not save the order to CSV.\n\nDetails: {e}"
+            )
+
+    def save_cart_to_csv(self, subtotal, tax, total):
+        """Append each line item of the cart to CSV with a shared order_id."""
+        file_exists = Path(CSV_FILE).exists()
+        order_id = self.generate_order_id()
+
+        # creates a new .csv file to save order
+        with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow([
+                    "order_id", "bread", "spread",
+                    "bread_price", "spread_price",
+                    "line_total", "subtotal", "tax", "total"
+                ])
+            # writes order to file
+            for item in self.cart:
+                writer.writerow([
+                    order_id,
+                    item["bread"],
+                    item["spread"],
+                    f"{item['bread_price']:.2f}",
+                    f"{item['spread_price']:.2f}",
+                    f"{item['line_total']:.2f}",
+                    f"{subtotal:.2f}",
+                    f"{tax:.2f}",
+                    f"{total:.2f}",
+                ])
+
+    def generate_order_id(self):
+        """Very simple order id: count of existing lines + 1"""
+        if not Path(CSV_FILE).exists():
+            return 1
+        with open(CSV_FILE, newline="", encoding="utf-8") as f:
+            return sum(1 for _ in f)  # rough, fine for small demo
+
+    # clear order button to empty cart
+    def clear_order(self, no_message=False):
+        self.cart.clear()
+        self.bread_var.set("")
+        self.spread_var.set("Plain")
+        self.update_cart_display()
+        if not no_message:
+            messagebox.showinfo(
+                "Order cleared",
+                "Your order has been cleared. You can start a new one."
+            )
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    app = JamsJamsApp(root)
+    root.mainloop()
+# runs app
